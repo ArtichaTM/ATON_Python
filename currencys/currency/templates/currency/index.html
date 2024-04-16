@@ -1,0 +1,61 @@
+{% extends "currency/base.html" %}
+{% block title %}Index{% endblock title %}
+{% block main %}
+  <div class="container text-center">
+    <div class="row">
+      <form action="/currency/" method="post" {% if form.is_bound %}class="was-validated"{% endif %}>
+        <div class="row row-cols-auto">
+          <div class="input-group g-3">
+            <span class="input-group-text">От</span>
+            <div class="form-floating col">
+              <input type="number" class="form-control" name="fromDay" value="{{ form.fromDay.value }}" min="1" max="31" required>
+              <label for="fromDay">{% if form.fromDay.errors %} <p>{{ error|escape }}</p> {% else %} День {% endif %}</label>
+            </div>
+            <span class="input-group-text">-</span>
+            <div class="form-floating col">
+              <input type="number" class="form-control" name="fromMonth" value="{{ form.fromMonth.value }}" min="1" max="12" required>
+              <label for="fromMonth">{% if form.fromMonth.errors %} <p>{{ error|escape }}</p> {% else %} Месяц {% endif %}</label>
+            </div>
+            <span class="input-group-text">-</span>
+            <div class="form-floating col">
+              <input type="number" class="form-control" name="fromYear" value="{{ form.fromYear.value }}" min="2003" max="2024" required>
+              <label for="fromYear">{% if form.fromYear.errors %} <p>{{ error|escape }}</p> {% else %} Год {% endif %}</label>
+            </div>
+          </div>
+          <div class="input-group g-3">
+            <span class="input-group-text">До</span>
+            <div class="form-floating col">
+              <input type="number" class="form-control" name="toDay" value="{{ form.toDay.value }}" min="1" max="31" required>
+              <label for="toDay">{% if form.toDay.errors %} <p>{{ error|escape }}</p> {% else %} День {% endif %}</label>
+            </div>
+            <span class="input-group-text">-</span>
+            <div class="form-floating col">
+              <input type="number" class="form-control" name="toMonth" value="{{ form.toMonth.value }}" min="1" max="12" required>
+              <label for="toMonth">{% if form.toMonth.errors %} <p>{{ error|escape }}</p> {% else %} Месяц {% endif %}</label>
+            </div>
+            <span class="input-group-text">-</span>
+            <div class="form-floating col">
+              <input type="number" class="form-control" name="toYear" value="{{ form.toYear.value }}" min="2003" max="2024" required>
+              <label for="toYear">{% if form.toYear.errors %} <p>{{ error|escape }}</p> {% else %} Год {% endif %}</label>
+            </div>
+          </div>
+        </div>
+        {% if form.non_field_errors %}
+        <div style="color: var(--bs-form-invalid-border-color);">
+          {% for error in form.non_field_errors %}
+            {{ error|escape }}
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="btn-group g-3" role="group" style="margin-top: 10px">
+          <button type="submit" class="btn btn-primary">Обновить</button>
+          <button type="reset" class="btn btn-secondary">Очистить</button>
+        </div>
+        {% csrf_token %}
+      </form>
+    </div>
+    <div class="row">
+      <p>Output</p>
+    </div>
+  </div>
+{% endblock main %}

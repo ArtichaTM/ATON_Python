@@ -81,6 +81,32 @@ DATABASES = {
     }
 }
 
+LOGGING_FOLDER = BASE_DIR / 'logging'
+LOGGING_FOLDER.mkdir(exist_ok=True)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "file": {
+            "level": "DEBUG",
+            "class": "logging.FileHandler",
+            "filename": LOGGING_FOLDER / 'log.log',
+        },
+    },
+    "loggers": {
+        "django_file": {
+            "handlers": ["file"],
+            "level": "WARNING",
+            "propagate": True,
+        },
+        "db_updater": {
+            "handlers": ["file"],
+            "level": "INFO",
+            "propagate": True,
+        },
+    },
+}
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators

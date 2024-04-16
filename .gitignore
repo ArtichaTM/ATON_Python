@@ -1,3 +1,4 @@
 venv
 __pycache__
 currencys/db.sqlite3
+currencys/logging

@@ -1,2 +1,4 @@
 django==5.0.4
 matplotlib==3.8.4
+beautifulsoup4==4.12.3
+aiohttp==3.9.4

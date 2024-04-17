@@ -1,6 +1,6 @@
 from django.db.models import *
 
-__all__ = ('CurrencyInfo', 'CurrencyCourse')
+__all__ = ('CurrencyInfo', 'CurrencyRate')
 
 class CurrencyInfo(Model):
     number = IntegerField(unique=True, primary_key=True)
@@ -10,7 +10,7 @@ class CurrencyInfo(Model):
     country = CharField(max_length=80, null=False)
 
 
-class CurrencyCourse(Model):
+class CurrencyRate(Model):
     code = ForeignKey(CurrencyInfo, on_delete=CASCADE, null=False)
     date = DateField(null=False)
     value = FloatField(null=False)

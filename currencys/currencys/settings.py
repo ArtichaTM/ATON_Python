@@ -86,11 +86,22 @@ LOGGING_FOLDER.mkdir(exist_ok=True)
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname}:{asctime}:{thread:d}:{name}:{message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
     "handlers": {
         "file": {
             "level": "DEBUG",
             "class": "logging.FileHandler",
             "filename": LOGGING_FOLDER / 'log.log',
+            "formatter": "verbose",
         },
     },
     "loggers": {

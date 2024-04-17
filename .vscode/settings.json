@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
         "currencys"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "basic"
 }

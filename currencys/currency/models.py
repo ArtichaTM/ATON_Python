@@ -11,9 +11,9 @@ class CurrencyInfo(Model):
 
 
 class CurrencyRate(Model):
-    code = ForeignKey(CurrencyInfo, on_delete=CASCADE, null=False)
+    currencyInfo = ForeignKey(CurrencyInfo, on_delete=CASCADE, null=False)
     date = DateField(null=False)
     value = FloatField(null=False)
 
     class Meta:
-        unique_together = ['code', 'date']
+        unique_together = ['currencyInfo', 'date']

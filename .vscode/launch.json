@@ -12,7 +12,6 @@
                 "runserver"
             ],
             "django": true,
-            "autoStartBrowser": true,
             "program": "${workspaceFolder}\\currencys\\manage.py"
         }
     ]

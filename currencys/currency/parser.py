@@ -73,7 +73,7 @@ class Updater:
             self.loop.close()
             self.loop = None
 
-    async def _get_page(self, url: str, allow_redirects: bool = True) -> str:
+    async def _get_page(self, url: str, allow_redirects: bool = False) -> str:
         assert isinstance(self.session, aiohttp.ClientSession)
         assert '{' not in url, "Got unformatted URL"
         async with self.session.get(url, allow_redirects=allow_redirects) as response:

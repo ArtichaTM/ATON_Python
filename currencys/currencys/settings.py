@@ -102,6 +102,7 @@ LOGGING = {
             "class": "logging.FileHandler",
             "filename": LOGGING_FOLDER / 'log.log',
             "formatter": "verbose",
+            'encoding': 'utf-8',
         },
     },
     "loggers": {

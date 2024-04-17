@@ -65,7 +65,7 @@ class Updater:
     def update(self) -> None:
         assert self.loop is None
         assert self.update_thread is None
-        self.update_thread = Thread(target=self._update, daemon=True, name='Database updater')
+        self.update_thread = Thread(target=self._update, name='Database updater')
         self.update_thread.start()
 
     async def _anti_spam(self) -> None:

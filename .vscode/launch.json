@@ -12,6 +12,9 @@
                 "runserver"
                 , "--noreload"
             ],
+            "env": {
+                "SECRET_KEY": "k15*(%1094(!5k5j1g52q04ASDasfK45))"
+            },
             "django": true,
             "program": "${workspaceFolder}\\currencys\\manage.py"
         }

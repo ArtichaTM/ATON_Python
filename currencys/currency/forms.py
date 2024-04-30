@@ -11,6 +11,7 @@ class DatesForm(forms.Form):
     toDay = forms.IntegerField(min_value=1, max_value=31)
     toMonth = forms.IntegerField(min_value=1, max_value=12)
     toYear = forms.IntegerField(min_value=2003, max_value=datetime.now().year)
+    currencys = forms.MultipleChoiceField(required=True)
 
     def clean(self) -> None:
         data = self.cleaned_data

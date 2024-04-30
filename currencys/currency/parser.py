@@ -6,11 +6,12 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from time import perf_counter
 
-from django.db.models import Max, Count
+from django.db.models import Max, Count, F, Subquery
 from django.db.utils import IntegrityError
 import bs4
 import aiohttp
 
+from .forms import DatesForm
 from .models import *
 from .apps import CurrencyConfig
 
@@ -33,6 +34,7 @@ class UniqueException(Exception):
         self.info = info
 
 class Updater:
+    MINIMUM_DATE = date(year=1992, month=1, day=1)
     __slots__ = (
         'loop', 'session', 'update_thread',
         'delay', 'last_request_time', 'logger', 'force_day_update'
@@ -85,33 +87,19 @@ class Updater:
         from django.db import connection
         table_name = f"{CurrencyConfig.name}_{CurrencyInfo.__qualname__.lower()}"
         if table_name not in connection.introspection.table_names():
-            self.logger.warning("DB-Updater: No tables found. Exiting")
+            self.logger.warning(" No tables found. Exiting")
 
-        self.logger.info("DB-Updater: Started updating")
+        self.logger.info("Started updating")
 
         if not CurrencyInfo.objects.count():
-            self.logger.warning("DB-Updater: Updating codes. This message should happen once")
+            self.logger.warning("Updating codes. This message should happen once")
             self.loop.run_until_complete(self._init_codes())
+            self.logger.info("Finished updating codes")
 
-        current_date: date | None = CurrencyRate.objects.aggregate(Max('date'))['date__max']
-        if current_date is None:
-            current_date = date(day=1, month=1, year=1992)
+        values = CurrencyInfo.objects.values_list('number', 'name').all()
+        DatesForm.declared_fields['currencys'].choices = tuple(values)
 
-        # If days interval too low, better use days update than update every currency by a period
-        if self.force_day_update:
-            coroutine = self._update_by_days(current_date)
-        if (date.today() - current_date).days > CurrencyInfo.objects.count():
-            coroutine = self._update_by_periods(current_date)
-        else:
-            coroutine = self._update_by_days(current_date)
-
-        try:
-            self.loop.run_until_complete(coroutine)
-        finally:
-            self.loop.run_until_complete(self.session.close())
-            self.session = None
-            self.loop.close()
-            self.loop = None
+        self.loop.run_until_complete(self._recheck_currencys())\
 
     async def _get_page(self, url: str, allow_redirects: bool = False) -> bs4.BeautifulSoup:
         assert isinstance(self.session, aiohttp.ClientSession)
@@ -121,6 +109,68 @@ class Updater:
             page = await response.text(encoding='windows-1251')
             soup = bs4.BeautifulSoup(page, features='html.parser')
             return soup
+
+    async def _recheck_currencys(self) -> None:
+        assert hasattr(CurrencyRate, 'currencyInfo')
+
+        all_ids: set[int] = {i['number'] async for i in CurrencyInfo.objects.values('number').aiterator()}
+        _info_ids = CurrencyRate.objects\
+            .values('currencyInfo')\
+            .annotate(date_max=Max('date'))
+        all_max_date: date | None = next(iter(
+            (await
+                CurrencyRate.objects
+                .aaggregate(Max('date'))
+            )
+            .values()
+        ))
+        if all_max_date is None:
+            all_max_date = self.MINIMUM_DATE
+        info_ids: dict[int, date] = {
+            i['currencyInfo']: i['date_max'] \
+            async for i in _info_ids.aiterator()
+        }
+
+        for id in all_ids:
+            maximum_date = info_ids.get(id, self.MINIMUM_DATE)
+            assert isinstance(maximum_date, date)
+            if maximum_date != all_max_date:
+                self.logger.warning(
+                    f"Currency with id={id} last date {maximum_date} differs from all "
+                    f"CurrencyRates maximum date {all_max_date}. "
+                    "Previous update interrupted? "
+                    "Server was shutdown for too long?"
+                )
+                await self._update_currency(
+                    currency=await CurrencyInfo.objects.aget(number=id),
+                    dates=self.date_periods(
+                        from_date=maximum_date + relativedelta(days=1),
+                        to_date=all_max_date
+                    )
+                )
+                self.logger.info(
+                    f"Currency {id} updated to max among "
+                    f"all currency infos ({maximum_date})"
+                )
+
+        target_date = date.today() - relativedelta(days=1)
+        difference = (target_date - all_max_date).days
+        self.logger.info(f'Difference between maximum date and today are {difference} days')
+        """
+        If difference between dates bigger than length of all ids better use
+        update by a periods. Else better use update by days
+        Reason: Update by days make requests for each day, while update
+            by periods make requests for each currency. So actually we compare
+            amount of requests that needs to be made
+        """
+        if difference > len(all_ids):
+            # Update by periods advantageous
+            self.logger.info("Decided to update by periods")
+            await self._update_by_periods(from_date=all_max_date, ids=all_ids)
+        else:
+            # Update by days advantageous
+            self.logger.info("Decided to update by days")
+            await self._update_by_days(overall_date_max=all_max_date)
 
     def _get_day_info(self, soup: bs4.BeautifulSoup) -> Generator[DayInfo, None, None]:
         tbody = soup.find(name='tbody')
@@ -192,11 +242,25 @@ class Updater:
                 )
                 group.create_task(currency_info.asave())
 
-    @staticmethod
-    async def _currency_rate_save(currency_rate: CurrencyRate, **info) -> None:
+    async def _currency_rate_save(self, currency_rate: CurrencyRate, **info) -> None:
         try:
             await currency_rate.asave()
         except* IntegrityError as e:
+            try:
+                existing = await CurrencyRate.objects\
+                    .select_related()\
+                    .aget(
+                        currencyInfo=currency_rate.currencyInfo,
+                        date=currency_rate.date
+                    )
+            except CurrencyRate.DoesNotExist as e:
+                info['existing'] = e.args[0]
+            else:
+                info['existing'] = {
+                    'info': existing.currencyInfo, 
+                    'date': existing.date,
+                    'value': existing.value
+                }
             raise UniqueException(info=info)
 
     async def _update_currency(self, currency: CurrencyInfo, dates: list[date]) -> None:
@@ -204,6 +268,9 @@ class Updater:
         next_date = iter(dates)
         next(next_date)
         for date_from, date_to in zip(current_date, next_date):
+            self.logger.debug(f"Updating {currency.number} {date_from}->{date_to}")
+            date_from_sec = date_from.toordinal()
+            date_to_sec = date_to.toordinal()
             date_to -= relativedelta(days=1)
             url = URL_PERIOD.format(
                 id=currency.number_url,
@@ -218,6 +285,10 @@ class Updater:
             try:
                 async with asyncio.TaskGroup() as group:
                     for period in self._get_period_info(soup):
+                        assert date_from_sec <= period.date.toordinal() <= date_to_sec, (
+                            "period date received from _get_period_info() is not in range: "
+                            f"{date_from} <= {period.date} <= {date_to}"
+                        )
                         currency_rate = CurrencyRate(
                             currencyInfo=currency,
                             date=period.date,
@@ -236,39 +307,105 @@ class Updater:
                 for exc in e.exceptions:
                     info = exc.info
                     self.logger.exception(
-                        "Somehow unique constraint failed on "
-                        f"info={info}"
+                        "Somehow unique constraint failed during period update on "
+                        f"info={info}",
+                        exc_info=False
                     )
                 raise
 
-    async def _update_by_periods(self, current_date: date) -> None:
-        assert isinstance(current_date, date)
-        self.logger.info("DB-Updater: Updating by periods")
-
+    @staticmethod
+    def date_periods(from_date: date, to_date: date | None = None) -> list[date]:
+        """ Generates dates from_date to to_date with maximum interval up to 2 years (364 days)
+        :param from_date: Starting date (inclusive)
+        :param to_date: Ending date (inclusive)
+        :return: List of dates from_date to to_date with
+            maximum interval up to 364 days
+            and
+            both dates inclusive
+        """
+        assert isinstance(from_date, date)
+        assert to_date is None or isinstance(to_date, date)
+        today = date.today()-relativedelta(days=1) if to_date is None else to_date
+        assert (today - from_date).days >= 1, (
+            f"Difference between dates {today} and {from_date} "
+            f"can't be below 1 day (difference={(today - from_date).days})"
+        )
+        current_date = from_date
         next_date = current_date + relativedelta(years=2)
-        today = date.today()
         date_ranges: list[date] = []
         while next_date < today:
             date_ranges.append(current_date)
             current_date += relativedelta(years=+2) # Leap year calculation included
             next_date += relativedelta(years=2)
+        date_ranges.append(today)
 
-        pre_today = today - relativedelta(days=1)
-        difference = pre_today - current_date
-        if difference.days > 1:
-            date_ranges.append(pre_today)
+        if len(date_ranges) == 1:
+            date_ranges.insert(0, from_date)
 
+        return date_ranges
+
+    async def _update_by_periods(
+            self,
+            from_date: date,
+            ids: set[int]
+        ) -> None:
+        assert isinstance(from_date, date)
+        assert isinstance(ids, set)
+        self.logger.info("DB-Updater: Updating by periods")
+
+        date_ranges = self.date_periods(from_date)
         self.logger.info(f"Updating from {date_ranges[0]} to {date_ranges[-1]}")
-
-        async for currency in CurrencyInfo.objects.aiterator(chunk_size=1):
-            assert isinstance(currency, CurrencyInfo)
-            self.logger.info(f"Updating currency {currency.name}")
+        for id in ids:
+            assert isinstance(id, int)
             await self._update_currency(
-                currency=currency,
+                currency=await CurrencyInfo.objects.aget(pk=id),
                 dates=date_ranges
             )
 
-
-    async def _update_by_days(self, current_date: date) -> None:
-        self.logger.info("DB-Updater: Updating by days")
-        pass
+    async def _update_by_days(
+        self,
+        overall_date_max: date,
+    ) -> None:
+        current_date = overall_date_max + relativedelta(days=1)
+        today = date.today() - relativedelta(days=1)
+        while current_date != today:
+            url = URL_DAY.format(
+                day=current_date.day,
+                month=current_date.month,
+                year=current_date.year,
+            )
+            soup = await self._get_page(url)
+            try:
+                async with asyncio.TaskGroup() as group:
+                    for currency in self._get_day_info(soup):
+                        try:
+                            currency_info = await CurrencyInfo.objects.aget(code=currency.code)
+                        except CurrencyInfo.DoesNotExist as e:
+                            raise CurrencyInfo.DoesNotExist(
+                                f"For some reason code {currency.code} "
+                                "does not exist in database. How?"
+                            ) from e
+                        currency_rate = CurrencyRate(
+                            currencyInfo=currency_info,
+                            date=current_date,
+                            value=currency.rate/currency.amount
+                        )
+                        group.create_task(
+                            self._currency_rate_save(
+                                currency_rate,
+                                currency=currency,
+                                date=current_date,
+                                value=currency.rate/currency.amount
+                            ),
+                            name=f'Saving currency rate {currency=}, {current_date=}'
+                        )
+            except* UniqueException as e:
+                for exc in e.exceptions:
+                    info = exc.info
+                    self.logger.exception(
+                        "Somehow unique constraint failed during day update on "
+                        f"info={info}",
+                        exc_info=False
+                    )
+                raise
+            current_date += relativedelta(days=1)

@@ -2,5 +2,8 @@
     "cSpell.words": [
         "currencys"
     ],
+    "files.watcherInclude": [
+        "currencys/logging/log.txt"
+    ],
     "python.analysis.typeCheckingMode": "basic"
 }

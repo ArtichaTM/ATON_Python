@@ -1,4 +1,12 @@
-from django.db.models import *
+from django.db.models import (
+    Model,
+    IntegerField,
+    CharField,
+    DateField,
+    ForeignKey,
+    FloatField,
+    CASCADE
+)
 
 __all__ = ('CurrencyInfo', 'CurrencyRate')
 

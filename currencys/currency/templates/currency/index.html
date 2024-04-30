@@ -1,4 +1,5 @@
 {% extends "currency/base.html" %}
+{% load static %}
 {% block title %}Index{% endblock title %}
 {% block main %}
   <div class="container text-center">
@@ -39,6 +40,13 @@
               <label for="toYear">{% if form.toYear.errors %} <p>{{ error|escape }}</p> {% else %} Год {% endif %}</label>
             </div>
           </div>
+          <div class="input-group g-3">
+            <select class="form-select" name="currencys" multiple>
+              {% for currency in currencys %}
+              <option value="{{ currency.number }}">{{ currency.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
         </div>
         {% if form.non_field_errors %}
         <div style="color: var(--bs-form-invalid-border-color);">
@@ -59,3 +67,6 @@
     </div>
   </div>
 {% endblock main %}
+{% block scripts %}
+<script src="{% static 'currency/form_fetch.js' %}" crossorigin="anonymous"></script>
+{% endblock %}

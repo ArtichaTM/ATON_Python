@@ -56,7 +56,7 @@ def index(request, status: int | None = None):
     else:
         form = forms.DatesForm()
         post = False
-    currencys = CurrencyInfo.objects.values('number', 'name').all()
+    currencys = CurrencyInfo.objects.values('number', 'name').order_by('name').all()
     assert CurrencyConfig.updater is not None
     return render(request, 'currency/index.html', context={
         'form': form,

@@ -4,3 +4,4 @@ currencys/db.sqlite3
 currencys/db.sqlite3-journal
 currencys/logging
 migrations
+**/static/*/image/*

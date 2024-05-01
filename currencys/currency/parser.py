@@ -1,16 +1,14 @@
 from typing import Generator, NamedTuple, Coroutine
-import asyncio
 from logging import getLogger
 from threading import Thread
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from time import perf_counter
+from time import perf_counter, sleep
 
 from django.db.models import Max, Count, F, Subquery
 from django.db.utils import IntegrityError
-from asgiref.sync import sync_to_async
+import requests
 import bs4
-import aiohttp
 
 from .forms import DatesForm
 from .models import *
@@ -37,8 +35,8 @@ class UniqueException(Exception):
 class Updater:
     MINIMUM_DATE = date(year=1992, month=1, day=1)
     __slots__ = (
-        'loop', 'session', 'update_thread',
-        'delay', 'last_request_time', 'logger', 'force_day_update'
+        'session', 'update_thread', 'delay',
+        'last_request_time', 'logger', 'force_day_update'
     )
 
     class DayInfo(NamedTuple):
@@ -56,8 +54,7 @@ class Updater:
     def __init__(self, sleep_delay: float = 1., force_day_update: bool = False) -> None:
         assert isinstance(sleep_delay, float)
         assert sleep_delay >= 0
-        self.loop: asyncio.AbstractEventLoop | None = None
-        self.session: aiohttp.ClientSession | None = None
+        self.session = None
         self.update_thread: Thread | None = None
         self.delay = sleep_delay
         self.last_request_time: float = perf_counter()
@@ -69,20 +66,18 @@ class Updater:
         return self.session is not None
 
     def update(self) -> None:
-        assert self.loop is None
         assert self.update_thread is None
         self.update_thread = Thread(target=self._update, name='Database updater')
         self.update_thread.start()
 
-    async def _anti_spam(self) -> None:
+    def _anti_spam(self) -> None:
         delay = self.delay - (perf_counter() - self.last_request_time)
         if delay < 0:
             return
-        await asyncio.sleep(delay)
+        sleep(delay)
         self.last_request_time = perf_counter()
 
     def _update_except(self) -> None:
-        assert self.loop is not None
         from django.db import connection
         table_name = f"{CurrencyConfig.name}_{CurrencyInfo.__qualname__.lower()}"
         if table_name not in connection.introspection.table_names():
@@ -93,64 +88,52 @@ class Updater:
 
         if not CurrencyInfo.objects.count():
             self.logger.warning("Updating codes. This message should happen once")
-            self.loop.run_until_complete(self._init_codes())
+            self._init_codes()
             self.logger.info("Finished updating codes")
 
         values = CurrencyInfo.objects.values_list('number', 'name').all()
         DatesForm.declared_fields['currencys'].choices = tuple(values)
 
-        self.loop.run_until_complete(self._recheck_currencys())
+        self._recheck_currencys()
 
     def _update(self) -> None:
-        assert self.loop is None
         assert isinstance(self.update_thread, Thread)
         assert self.session is None
-        self.loop = asyncio.new_event_loop()
-        self.session = aiohttp.ClientSession(loop=self.loop)
+        self.session = requests.Session()
 
         try:
             self._update_except()
-        except KeyboardInterrupt:
-            pass
-        except RuntimeError as e:
-            if e.args[0] != 'cannot schedule new futures after shutdown':
-                raise
         finally:
             assert self.session is not None
-            self.loop.run_until_complete(self.session.close())
-            self.loop.stop()
-            self.loop.close()
-            self.loop = None
+            self.session.close()
             self.session = None
 
-    async def _get_page(self, url: str, allow_redirects: bool = False) -> bs4.BeautifulSoup:
-        assert isinstance(self.session, aiohttp.ClientSession)
+    def _get_page(self, url: str, allow_redirects: bool = False) -> bs4.BeautifulSoup:
+        assert self.session is not None
         assert '{' not in url, "Got unformatted URL"
-        await self._anti_spam()
-        async with self.session.get(url, allow_redirects=allow_redirects) as response:
-            page = await response.text(encoding='windows-1251')
+        self._anti_spam()
+        with self.session.get(url, allow_redirects=allow_redirects) as response:
+            response.encoding = 'windows-1251'
+            page = response.text
             soup = bs4.BeautifulSoup(page, features='html.parser')
             return soup
 
-    async def _recheck_currencys(self) -> None:
+    def _recheck_currencys(self) -> None:
         assert hasattr(CurrencyRate, 'currencyInfo')
 
-        all_ids: set[int] = {i['number'] async for i in CurrencyInfo.objects.values('number').aiterator()}
+        all_ids: set[int] = {i['number'] for i in CurrencyInfo.objects.values('number')}
         _info_ids = CurrencyRate.objects\
             .values('currencyInfo')\
             .annotate(date_max=Max('date'))
-        all_max_date: date | None = next(iter(
-            (await
-                CurrencyRate.objects
-                .aaggregate(Max('date'))
-            )
+        all_max_date: date | None = next(iter(CurrencyRate.objects
+            .aggregate(Max('date'))
             .values()
         ))
         if all_max_date is None:
             all_max_date = self.MINIMUM_DATE
         info_ids: dict[int, date] = {
             i['currencyInfo']: i['date_max'] \
-            async for i in _info_ids.aiterator()
+            for i in _info_ids
         }
         print(*[f"{key}: {value}\n" for key, value in info_ids.items()])
 
@@ -164,7 +147,6 @@ class Updater:
                 f"({all_max_date} - {maximum_date})"
                 )
             if id_difference > 1:
-                assert self.loop is not None
                 self.logger.warning(
                     f"Currency with id={id} last date {maximum_date} differs "
                     f"from all CurrencyRates maximum date {all_max_date}"
@@ -172,12 +154,12 @@ class Updater:
                     "Previous update interrupted? "
                     "Server was shutdown for too long?"
                 )
-                currency_info = await CurrencyInfo.objects.aget(number=id)
+                currency_info = CurrencyInfo.objects.get(number=id)
                 dates = self.date_periods(
                     from_date=maximum_date + relativedelta(days=1),
                     to_date=all_max_date
                 )
-                await self._update_currency(
+                self._update_currency(
                     currency=currency_info,
                     dates=dates
                 )
@@ -205,11 +187,11 @@ class Updater:
         if difference > len(all_ids):
             # Update by periods advantageous
             self.logger.info("Decided to update by periods")
-            await self._update_by_periods(from_date=all_max_date, ids=all_ids)
+            self._update_by_periods(from_date=all_max_date, ids=all_ids)
         else:
             # Update by days advantageous
             self.logger.info("Decided to update by days")
-            await self._update_by_days()
+            self._update_by_days()
 
     def _get_day_info(self, soup: bs4.BeautifulSoup) -> Generator[DayInfo, None, None]:
         tbody = soup.find(name='tbody')
@@ -246,42 +228,46 @@ class Updater:
                 change=change
             )
 
-    async def _init_codes(self) -> None:
-        assert self.loop is not None
-        soup = await self._get_page('https://www.finmarket.ru/currency/banknotes/')
+    def _init_codes(self) -> None:
+        soup = self._get_page('https://www.finmarket.ru/currency/banknotes/')
         table = soup.find(name='table')
         assert isinstance(table, bs4.Tag)
         iterator = iter(table)
         for _ in range(4): next(iterator)  # Skipping two rows (they are header part)
-        async with asyncio.TaskGroup() as group:
-            for row in iterator:
-                if row == '\n':
-                    continue
-                assert isinstance(row, bs4.Tag)
-                name, code, number, country = row.find_all(name='td')
-                assert isinstance(name, bs4.Tag)
-                assert isinstance(code, bs4.Tag)
-                assert isinstance(number, bs4.Tag)
-                assert isinstance(country, bs4.Tag)
-                a_tag = name.a
-                if a_tag is None:
-                    continue
-                assert isinstance(a_tag, bs4.Tag)
-                assert isinstance(a_tag['href'], str)
-                number_url = int(a_tag['href'].split('=')[1])
-                name, code, number, country = name.text, code.text, number.text, country.text
-                name = name.replace('\n', '').strip()
-                number = int(number)
-                currency_info =CurrencyInfo(
-                    number=number,
-                    number_url=number_url,
-                    code=code,
-                    name=name,
-                    country=country
-                )
-                group.create_task(currency_info.asave())
+        currency_infos: list[CurrencyInfo] = []
+        for row in iterator:
+            if row == '\n':
+                continue
+            assert isinstance(row, bs4.Tag)
+            name, code, number, country = row.find_all(name='td')
+            assert isinstance(name, bs4.Tag)
+            assert isinstance(code, bs4.Tag)
+            assert isinstance(number, bs4.Tag)
+            assert isinstance(country, bs4.Tag)
+            a_tag = name.a
+            if a_tag is None:
+                continue
+            assert isinstance(a_tag, bs4.Tag)
+            assert isinstance(a_tag['href'], str)
+            number_url = int(a_tag['href'].split('=')[1])
+            name, code, number, country = name.text, code.text, number.text, country.text
+            name = name.replace('\n', '').strip()
+            number = int(number)
+            currency_info = CurrencyInfo(
+                number=number,
+                number_url=number_url,
+                code=code,
+                name=name,
+                country=country
+            )
+            currency_infos.append(currency_info)
+        CurrencyInfo.objects.bulk_create(
+            currency_infos,
+            ignore_conflicts=False,
+            update_conflicts=False
+        )
 
-    async def _update_currency(self, currency: CurrencyInfo, dates: list[date]) -> None:
+    def _update_currency(self, currency: CurrencyInfo, dates: list[date]) -> None:
         current_date = iter(dates)
         next_date = iter(dates)
         next(next_date)
@@ -303,7 +289,7 @@ class Updater:
                 toMonth=date_to.month,
                 toYear=date_to.year
             )
-            soup = await self._get_page(url)
+            soup = self._get_page(url)
             for period in self._get_period_info(soup):
                 assert date_from_sec <= period.date.toordinal() <= date_to_sec, (
                     "period date received from _get_period_info() is not in range: "
@@ -315,7 +301,7 @@ class Updater:
                     value=period.rate
                 )
                 currency_rates.append(currency_rate)
-        await sync_to_async(CurrencyRate.objects.bulk_create)(
+        CurrencyRate.objects.bulk_create(
             currency_rates,
             ignore_conflicts=False,
             update_conflicts=False
@@ -355,7 +341,7 @@ class Updater:
 
         return date_ranges
 
-    async def _update_by_periods(
+    def _update_by_periods(
             self,
             from_date: date,
             ids: set[int]
@@ -368,13 +354,13 @@ class Updater:
         self.logger.info(f"Updating from {date_ranges[0]} to {date_ranges[-1]}")
         for id in ids:
             assert isinstance(id, int)
-            await self._update_currency(
-                currency=await CurrencyInfo.objects.aget(pk=id),
+            self._update_currency(
+                currency=CurrencyInfo.objects.get(pk=id),
                 dates=date_ranges
             )
 
-    async def _update_by_days(self) -> None:
-        dates = CurrencyRate.objects.annotate(date_max=Max("date")).order_by('date_max')[:2]
+    def _update_by_days(self) -> None:
+        # dates = CurrencyRate.objects.annotate(date_max=Max("date")).order_by('date_max')[:2]
         today = date.today() - relativedelta(days=1)
         while current_date != today:
             self.logger.debug(f"Updating day {current_date}")
@@ -383,11 +369,11 @@ class Updater:
                 month=current_date.month,
                 year=current_date.year,
             )
-            soup = await self._get_page(url)
+            soup = self._get_page(url)
             currency_rates: list[CurrencyRate] = []
             for currency in self._get_day_info(soup):
                 try:
-                    currency_info = await CurrencyInfo.objects.aget(code=currency.code)
+                    currency_info = CurrencyInfo.objects.get(code=currency.code)
                 except CurrencyInfo.DoesNotExist as e:
                     raise CurrencyInfo.DoesNotExist(
                         f"For some reason code {currency.code} "
@@ -399,6 +385,9 @@ class Updater:
                     value=currency.rate/currency.amount
                 )
                 currency_rates.append(currency_rate)
-            await sync_to_async(CurrencyRate.objects.bulk_create)(currency_rates, update_conflicts=True)
+            CurrencyRate.objects.bulk_create(
+                currency_rates,
+                update_conflicts=True
+            )
             currency_rates.clear()
             current_date += relativedelta(days=1)

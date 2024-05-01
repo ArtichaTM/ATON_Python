@@ -1,10 +1,13 @@
 {% extends "currency/base.html" %}
 {% load static %}
 {% block title %}Index{% endblock title %}
+{% block head %}
+<link rel="stylesheet" href="{% static 'currency/css/index.css' %}" crossorigin="anonymous">
+{% endblock %}
 {% block main %}
-  <div class="container text-center">
+  <div class="container text-center h-100">
     <div class="row">
-      <form action="/currency/" method="post" {% if form.is_bound %}class="was-validated"{% endif %}>
+      <form id="main_form" action="/currency/" method="post" {% if form.is_bound %}class="was-validated"{% endif %}>
         <div class="row row-cols-auto">
           <div class="input-group g-3">
             <span class="input-group-text">От</span>
@@ -41,7 +44,7 @@
             </div>
           </div>
           <div class="input-group g-3">
-            <select class="form-select" name="currencys" multiple>
+            <select class="form-select" name="currencys" multiple required>
               {% for currency in currencys %}
               <option value="{{ currency.number }}">{{ currency.name }}</option>
               {% endfor %}
@@ -62,11 +65,15 @@
         {% csrf_token %}
       </form>
     </div>
-    <div class="row">
-      <p>Output</p>
+    <div id="graph" class="row h-100">
     </div>
   </div>
 {% endblock main %}
 {% block scripts %}
-<script src="{% static 'currency/form_fetch.js' %}" crossorigin="anonymous"></script>
+<script src="{% static 'currency/js/form_fetch.js' %}" crossorigin="anonymous"></script>
+<script type="text/javascript">
+  var fetch_href = "{% url 'currency:fetch' %}";
+</script>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script> 
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script> 
 {% endblock %}

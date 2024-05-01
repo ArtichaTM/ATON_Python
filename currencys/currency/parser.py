@@ -87,6 +87,7 @@ class Updater:
         table_name = f"{CurrencyConfig.name}_{CurrencyInfo.__qualname__.lower()}"
         if table_name not in connection.introspection.table_names():
             self.logger.warning(" No tables found. Exiting")
+            return
 
         self.logger.info("Started updating")
 
@@ -151,11 +152,17 @@ class Updater:
             i['currencyInfo']: i['date_max'] \
             async for i in _info_ids.aiterator()
         }
+        print(*[f"{key}: {value}\n" for key, value in info_ids.items()])
 
         for id in all_ids:
             maximum_date = info_ids.get(id, self.MINIMUM_DATE)
             assert isinstance(maximum_date, date)
             id_difference = (all_max_date - maximum_date).days
+            self.logger.info(
+                f"Difference for {id} between max "
+                f"and today is {id_difference} days "
+                f"({all_max_date} - {maximum_date})"
+                )
             if id_difference > 1:
                 assert self.loop is not None
                 self.logger.warning(
@@ -166,12 +173,13 @@ class Updater:
                     "Server was shutdown for too long?"
                 )
                 currency_info = await CurrencyInfo.objects.aget(number=id)
+                dates = self.date_periods(
+                    from_date=maximum_date + relativedelta(days=1),
+                    to_date=all_max_date
+                )
                 await self._update_currency(
                     currency=currency_info,
-                    dates=self.date_periods(
-                        from_date=maximum_date + relativedelta(days=1),
-                        to_date=all_max_date
-                    )
+                    dates=dates
                 )
                 self.logger.info(
                     f"Currency {currency_info.name} ({id}) updated "
@@ -201,7 +209,7 @@ class Updater:
         else:
             # Update by days advantageous
             self.logger.info("Decided to update by days")
-            await self._update_by_days(overall_date_max=all_max_date)
+            await self._update_by_days()
 
     def _get_day_info(self, soup: bs4.BeautifulSoup) -> Generator[DayInfo, None, None]:
         tbody = soup.find(name='tbody')
@@ -283,6 +291,9 @@ class Updater:
             date_from_sec = date_from.toordinal()
             date_to_sec = date_to.toordinal()
             date_to -= relativedelta(days=1)
+            if date_from == date_to:
+                continue
+            assert date_to > date_from
             url = URL_PERIOD.format(
                 number=currency.number_url,
                 fromDay=date_from.day,
@@ -304,7 +315,11 @@ class Updater:
                     value=period.rate
                 )
                 currency_rates.append(currency_rate)
-        await sync_to_async(CurrencyRate.objects.bulk_create)(currency_rates)
+        await sync_to_async(CurrencyRate.objects.bulk_create)(
+            currency_rates,
+            ignore_conflicts=False,
+            update_conflicts=False
+        )
 
     @staticmethod
     def date_periods(from_date: date, to_date: date | None = None) -> list[date]:
@@ -358,20 +373,18 @@ class Updater:
                 dates=date_ranges
             )
 
-    async def _update_by_days(
-        self,
-        overall_date_max: date,
-    ) -> None:
-        current_date = overall_date_max + relativedelta(days=1)
+    async def _update_by_days(self) -> None:
+        dates = CurrencyRate.objects.annotate(date_max=Max("date")).order_by('date_max')[:2]
         today = date.today() - relativedelta(days=1)
-        currency_rates: list[CurrencyRate] = []
         while current_date != today:
+            self.logger.debug(f"Updating day {current_date}")
             url = URL_DAY.format(
                 day=current_date.day,
                 month=current_date.month,
                 year=current_date.year,
             )
             soup = await self._get_page(url)
+            currency_rates: list[CurrencyRate] = []
             for currency in self._get_day_info(soup):
                 try:
                     currency_info = await CurrencyInfo.objects.aget(code=currency.code)
@@ -386,5 +399,6 @@ class Updater:
                     value=currency.rate/currency.amount
                 )
                 currency_rates.append(currency_rate)
+            await sync_to_async(CurrencyRate.objects.bulk_create)(currency_rates, update_conflicts=True)
+            currency_rates.clear()
             current_date += relativedelta(days=1)
-        await sync_to_async(CurrencyRate.objects.bulk_create)(currency_rates)

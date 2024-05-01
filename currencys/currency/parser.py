@@ -106,6 +106,8 @@ class Updater:
 
         try:
             self._update_except()
+        except KeyboardInterrupt:
+            pass
         finally:
             assert self.session is not None
             self.loop.run_until_complete(self.session.close())

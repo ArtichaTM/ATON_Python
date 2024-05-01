@@ -2,6 +2,8 @@ const form = document.querySelector("#main_form");
 const graph = document.querySelector("#graph");
 const toastsContainer = document.querySelector('#toasts-container')
 
+var initialized = false;
+
 async function sendData() {
   // Associate the FormData object with the form element
   const formData = new FormData(form);
@@ -26,7 +28,7 @@ async function sendData() {
 }
 
 window.addEventListener('load', (_) => {
-  setGraph({info: []})
+  Plotly.newPlot(graph, {info: []})
   for (var i = 0; i < toastsContainer.children.length; i++) {
     bootstrap.Toast.getOrCreateInstance(toastsContainer.children[i]).show()
   }
@@ -34,7 +36,7 @@ window.addEventListener('load', (_) => {
 
 function setGraph(json) {
   console.log("Got: ", json['info'])
-  Plotly.newPlot(graph, json['info'], {
+  Plotly.react(graph, json['info'], {
     showlegend: true
   })
 }

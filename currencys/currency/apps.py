@@ -1,5 +1,3 @@
-from threading import Thread
-
 from django.apps import AppConfig
 
 __all__ = ('CurrencyConfig', )
@@ -8,9 +6,10 @@ __all__ = ('CurrencyConfig', )
 class CurrencyConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "currency"
+    updater = None
 
     def ready(self) -> None:
         super().ready()
         from .parser import Updater
-        updater = Updater()
-        updater.update()
+        self.__class__.updater = Updater()
+        self.__class__.updater.update()

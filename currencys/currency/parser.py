@@ -53,7 +53,6 @@ class Updater:
         rate: float
         change: float
 
-
     def __init__(self, sleep_delay: float = 1., force_day_update: bool = False) -> None:
         assert isinstance(sleep_delay, float)
         assert sleep_delay >= 0
@@ -64,6 +63,10 @@ class Updater:
         self.last_request_time: float = perf_counter()
         self.force_day_update = force_day_update
         self.logger = getLogger('db_updater')
+
+    @property
+    def updating(self) -> bool:
+        return self.session is not None
 
     def update(self) -> None:
         assert self.loop is None
@@ -108,6 +111,9 @@ class Updater:
             self._update_except()
         except KeyboardInterrupt:
             pass
+        except RuntimeError as e:
+            if e.args[0] != 'cannot schedule new futures after shutdown':
+                raise
         finally:
             assert self.session is not None
             self.loop.run_until_complete(self.session.close())

@@ -3,8 +3,10 @@ from datetime import date
 from django.shortcuts import render
 from django.http.response import JsonResponse
 
+
 from . import forms
 from .models import CurrencyInfo, CurrencyRate
+from .apps import CurrencyConfig
 
 
 def info_fetch(request):
@@ -55,9 +57,11 @@ def index(request, status: int | None = None):
         form = forms.DatesForm()
         post = False
     currencys = CurrencyInfo.objects.values('number', 'name').all()
+    assert CurrencyConfig.updater is not None
     return render(request, 'currency/index.html', context={
         'form': form,
         'post': post,
-        'currencys': currencys
+        'currencys': currencys,
+        'updating': CurrencyConfig.updater.updating
     }, status=status)
 

@@ -5,6 +5,11 @@
 <link rel="stylesheet" href="{% static 'currency/css/index.css' %}" crossorigin="anonymous">
 {% endblock %}
 {% block main %}
+  <div id="toasts-container" aria-live="polite" aria-atomic="true" class="z-1 position-fixed top-0 end-0 p-3">
+    {% if updating %}
+      {% include "currency/updating_warning.html" %}
+    {% endif %}
+  </div>
   <div class="container text-center h-100">
     <div class="row">
       <form id="main_form" action="/currency/" method="post" {% if form.is_bound %}class="was-validated"{% endif %}>
@@ -70,7 +75,7 @@
   </div>
 {% endblock main %}
 {% block scripts %}
-<script src="{% static 'currency/js/form_fetch.js' %}" crossorigin="anonymous"></script>
+<script src="{% static 'currency/js/index.js' %}" crossorigin="anonymous"></script>
 <script type="text/javascript">
   var fetch_href = "{% url 'currency:fetch' %}";
 </script>

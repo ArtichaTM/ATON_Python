@@ -1,5 +1,6 @@
 const form = document.querySelector("#main_form");
 const graph = document.querySelector("#graph");
+const toastsContainer = document.querySelector('#toasts-container')
 
 async function sendData() {
   // Associate the FormData object with the form element
@@ -26,6 +27,9 @@ async function sendData() {
 
 window.addEventListener('load', (_) => {
   setGraph({info: []})
+  for (var i = 0; i < toastsContainer.children.length; i++) {
+    bootstrap.Toast.getOrCreateInstance(toastsContainer.children[i]).show()
+  }
 })
 
 function setGraph(json) {

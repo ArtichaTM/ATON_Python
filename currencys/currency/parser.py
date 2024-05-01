@@ -77,6 +77,7 @@ class Updater:
     def _anti_spam(self) -> None:
         delay = self.delay - (perf_counter() - self.last_request_time)
         if delay < 0:
+            self.last_request_time = perf_counter()
             return
         sleep(delay)
         self.last_request_time = perf_counter()

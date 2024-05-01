@@ -17,11 +17,16 @@ class CurrencyInfo(Model):
     name = CharField(max_length=80, null=False)
     country = CharField(max_length=80, null=False)
 
+    def __str__(self) -> str:
+        return f"{self.name}"
 
 class CurrencyRate(Model):
     currencyInfo = ForeignKey(CurrencyInfo, on_delete=CASCADE, null=False)
     date = DateField(null=False)
     value = FloatField(null=False)
+
+    def __str__(self) -> str:
+        return f"{self.currencyInfo.name} from {self.date}"
 
     class Meta:
         unique_together = ['currencyInfo', 'date']

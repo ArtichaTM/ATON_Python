@@ -125,6 +125,7 @@ class Updater:
 
     def _recheck_currencys(self) -> None:
         assert hasattr(CurrencyRate, 'currencyInfo')
+        assert hasattr(CurrencyRate, 'date')
 
         all_ids: set[int] = {i['number'] for i in CurrencyInfo.objects.values('number')}
         _info_ids = CurrencyRate.objects\
@@ -279,6 +280,7 @@ class Updater:
                 country=country
             )
             currency_infos.append(currency_info)
+        assert currency_infos, "How currency_infos can be empty?"
         CurrencyInfo.objects.bulk_create(
             currency_infos,
             ignore_conflicts=False,
@@ -319,7 +321,7 @@ class Updater:
                     value=period.rate
                 )
                 currency_rates.append(currency_rate)
-        assert currency_rates
+        assert currency_rates, "How currency_rates can be empty?"
         CurrencyRate.objects.bulk_create(
             currency_rates,
             ignore_conflicts=False,
@@ -339,7 +341,7 @@ class Updater:
         assert isinstance(from_date, date)
         assert to_date is None or isinstance(to_date, date)
         today = date.today()-relativedelta(days=1) if to_date is None else to_date
-        difference = (today - from_date).days >= 1
+        difference = (today - from_date).days
         if difference < 0:
             raise RuntimeError("Dates are misplaced")
         assert (today - from_date).days >= 1, (

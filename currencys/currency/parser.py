@@ -1,4 +1,4 @@
-from typing import Generator, NamedTuple, Coroutine
+from typing import Generator, NamedTuple, Any
 from logging import getLogger
 from threading import Thread
 from datetime import date
@@ -22,7 +22,7 @@ URL_PERIOD: str = (
     '&ed={toDay}&em={toMonth}&ey={toYear}'
 )
 URL_DAY: str = (
-    'https://www.finmarket.ru/currency/rates/?bd={day}&bm={month}&by={year}'
+    'https://www.finmarket.ru/currency/rates/?id=10148&bd={day}&bm={month}&by={year}'
 )
 
 class UniqueException(Exception):
@@ -67,7 +67,11 @@ class Updater:
 
     def update(self) -> None:
         assert self.update_thread is None
-        self.update_thread = Thread(target=self._update, name='Database updater')
+        self.update_thread = Thread(
+            target=self._update,
+            name='Database updater',
+            daemon=True
+        )
         self.update_thread.start()
 
     def _anti_spam(self) -> None:
@@ -135,7 +139,6 @@ class Updater:
             i['currencyInfo']: i['date_max'] \
             for i in _info_ids
         }
-        print(*[f"{key}: {value}\n" for key, value in info_ids.items()])
 
         for id in all_ids:
             maximum_date = info_ids.get(id, self.MINIMUM_DATE)
@@ -229,6 +232,16 @@ class Updater:
             )
 
     def _init_codes(self) -> None:
+        # Getting latest day info
+        day_variable = self._get_page(URL_DAY.format(
+            day=1,
+            month=1,
+            year=2024,
+        ))
+        assert isinstance(day_variable, bs4.BeautifulSoup)
+        day_variable = self._get_day_info(day_variable)
+        available_codes: set[str] = {i.code for i in day_variable}
+
         soup = self._get_page('https://www.finmarket.ru/currency/banknotes/')
         table = soup.find(name='table')
         assert isinstance(table, bs4.Tag)
@@ -251,6 +264,10 @@ class Updater:
             assert isinstance(a_tag['href'], str)
             number_url = int(a_tag['href'].split('=')[1])
             name, code, number, country = name.text, code.text, number.text, country.text
+            assert isinstance(name, str)
+            assert isinstance(code, str)
+            if code not in available_codes:
+                continue
             name = name.replace('\n', '').strip()
             number = int(number)
             currency_info = CurrencyInfo(
@@ -301,6 +318,7 @@ class Updater:
                     value=period.rate
                 )
                 currency_rates.append(currency_rate)
+        assert currency_rates
         CurrencyRate.objects.bulk_create(
             currency_rates,
             ignore_conflicts=False,

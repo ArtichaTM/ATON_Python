@@ -35,10 +35,10 @@ window.addEventListener('load', (_) => {
 })
 
 function setGraph(json) {
-  console.log("Got: ", json['info'])
   Plotly.react(graph, json['info'], {
     showlegend: true
   })
+  graph.scrollIntoView()
 }
 
 // Take over form submission

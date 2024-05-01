@@ -1,12 +1,11 @@
-from typing import Generator, NamedTuple, Any
+from typing import Generator, NamedTuple
 from logging import getLogger
 from threading import Thread
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from time import perf_counter, sleep
 
-from django.db.models import Max, Count, F, Subquery
-from django.db.utils import IntegrityError
+from django.db.models import Max, Min
 import requests
 import bs4
 
@@ -180,7 +179,16 @@ class Updater:
                 )
 
         target_date = date.today() - relativedelta(days=1)
-        difference = (target_date - all_max_date).days
+        _minimum_date: list[date] = [i[0] for i in CurrencyRate.objects
+            .values('currencyInfo')
+            .annotate(date_max=Max('date'))
+            .values_list('date_max')
+        ]
+        if _minimum_date:
+            minimum_date: date = min(_minimum_date)
+        else:
+            minimum_date: date = all_max_date
+        difference = (target_date - minimum_date).days
         self.logger.info(f'Difference between maximum date and today are {difference} days')
         """
         If difference between dates bigger than length of all ids better use
@@ -192,11 +200,12 @@ class Updater:
         if difference > len(all_ids):
             # Update by periods advantageous
             self.logger.info("Decided to update by periods")
-            self._update_by_periods(from_date=all_max_date, ids=all_ids)
+            self._update_by_periods(from_date=minimum_date, ids=all_ids)
         else:
             # Update by days advantageous
             self.logger.info("Decided to update by days")
-            self._update_by_days()
+            self._update_by_days(date_starting=minimum_date, date_target=target_date)
+        self.logger.info("Updating finished")
 
     def _get_day_info(self, soup: bs4.BeautifulSoup) -> Generator[DayInfo, None, None]:
         tbody = soup.find(name='tbody')
@@ -244,6 +253,7 @@ class Updater:
         day_variable = self._get_day_info(day_variable)
         available_codes: set[str] = {i.code for i in day_variable}
 
+        # Getting all banknotes
         soup = self._get_page('https://www.finmarket.ru/currency/banknotes/')
         table = soup.find(name='table')
         assert isinstance(table, bs4.Tag)
@@ -380,35 +390,36 @@ class Updater:
                 dates=date_ranges
             )
 
-    def _update_by_days(self) -> None:
-        # dates = CurrencyRate.objects.annotate(date_max=Max("date")).order_by('date_max')[:2]
-        today = date.today() - relativedelta(days=1)
-        while current_date != today:
-            self.logger.debug(f"Updating day {current_date}")
+    def _update_by_days(self, date_starting: date, date_target: date) -> None:
+        assert isinstance(date_starting, date)
+        while date_starting != date_target:
+            self.logger.debug(f"Updating day {date_starting}")
             url = URL_DAY.format(
-                day=current_date.day,
-                month=current_date.month,
-                year=current_date.year,
+                day=date_starting.day,
+                month=date_starting.month,
+                year=date_starting.year,
             )
             soup = self._get_page(url)
             currency_rates: list[CurrencyRate] = []
             for currency in self._get_day_info(soup):
                 try:
                     currency_info = CurrencyInfo.objects.get(code=currency.code)
-                except CurrencyInfo.DoesNotExist as e:
-                    raise CurrencyInfo.DoesNotExist(
-                        f"For some reason code {currency.code} "
-                        "does not exist in database. How?"
-                    ) from e
+                except CurrencyInfo.DoesNotExist:
+                    self.logger.info(
+                        f"Currency {currency.name} doesn't exist in DB, "
+                        "but usually it's okay"
+                    )
+                    continue
                 currency_rate = CurrencyRate(
                     currencyInfo=currency_info,
-                    date=current_date,
+                    date=date_starting,
                     value=currency.rate/currency.amount
                 )
                 currency_rates.append(currency_rate)
             CurrencyRate.objects.bulk_create(
                 currency_rates,
-                update_conflicts=True
+                ignore_conflicts=True,
+                update_conflicts=False
             )
             currency_rates.clear()
-            current_date += relativedelta(days=1)
+            date_starting += relativedelta(days=1)
